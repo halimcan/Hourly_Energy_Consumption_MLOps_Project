@@ -1,55 +1,136 @@
-import pandas as pd
-from sklearn.metrics import mean_absolute_error
-from src.models.xgboost_model import XGBoostModel
+from prefect import flow
+from src.training.train_baseline import train_baseline
+from src.training.train_xgboost import train_xgboost
+# from src.training.train_prophet import train_prophet  # ileride
+
+import json
+import joblib
+from pathlib import Path
+import polars as pl
 
 
-def train_xgboost(data_path: str, target_col: str):
+@flow(name="evaluate-and-promote-multi-state")
+def evaluate_and_promote():
 
-    # 1️⃣ Load data
-    df = pd.read_parquet(data_path)
+    processed_dir = Path("data/processed")
+    artifact_root = Path("src/registry/artifacts")
+    production_file = Path("src/registry/production.json")
 
-    # -------------------------
-    # Feature temizliği
-    # -------------------------
+    parquet_files = list(processed_dir.glob("*_processed.parquet"))
 
-    # Datetime model feature olamaz
-    if "Datetime" in df.columns:
-        df = df.drop(columns=["Datetime"])
+    if not parquet_files:
+        print("❌ Processed veri bulunamadı.")
+        return
 
-    # State metadata'dır, model feature değildir
-    if "state" in df.columns:
-        df = df.drop(columns=["state"])
+    print(f"\n🚀 Toplam {len(parquet_files)} state işlenecek.\n")
 
-    # -------------------------
-    # 2️⃣ Train / Test split
-    # Son 24 saat test
-    # -------------------------
-    train_df = df.iloc[:-24]
-    test_df = df.iloc[-24:]
+    # ==========================================================
+    # Yeni production config (temiz başlangıç)
+    # ==========================================================
+    production_config = {
+        "mlflow": {
+            "tracking_uri": "http://mlflow:5000",
+            "experiment_name": "energy_forecasting",
+            "run_id": None,
+            "model_uri": None
+        },
+        "states": {}
+    }
 
-    X_train = train_df.drop(columns=[target_col])
-    y_train = train_df[target_col]
+    # ==========================================================
+    # LOOP – HER STATE
+    # ==========================================================
+    for file in parquet_files:
 
-    X_test = test_df.drop(columns=[target_col])
-    y_test = test_df[target_col]
+        print("=" * 60)
+        print(f"İşleniyor: {file.name}")
 
-    # -------------------------
-    # 3️⃣ Model
-    # -------------------------
-    model = XGBoostModel()
-    model.train(X_train, y_train)
+        df = pl.read_parquet(file)
+        state = df["state"][0]
+        print(f"State: {state}")
 
-    # -------------------------
-    # 4️⃣ Predict
-    # -------------------------
-    predictions = model.predict(X_test)
+        # -------------------------
+        # Train models
+        # -------------------------
+        results = []
 
-    # -------------------------
-    # 5️⃣ Evaluate
-    # -------------------------
-    mae = mean_absolute_error(y_test, predictions)
+        baseline_result = train_baseline(str(file), "target")
+        results.append(baseline_result)
+
+        xgb_result = train_xgboost(str(file), "target")
+        results.append(xgb_result)
+
+        # prophet_result = train_prophet(...)
+        # results.append(prophet_result)
+
+        for r in results:
+            print(f"{r['model_name']} MAE: {r['metrics']['mae']}")
+
+        # -------------------------
+        # Compare (MODEL-AGNOSTIC)
+        # -------------------------
+        winner = min(
+            results,
+            key=lambda x: x["metrics"]["mae"]
+        )
+
+        winner_name = winner["model_name"]
+        winner_model = winner["model"]
+        winner_metrics = winner["metrics"]
+        winner_features = winner.get("feature_columns")
+
+        print(f"🏆 Winner: {winner_name}")
+
+        # -------------------------
+        # Save artifacts (state bazlı)
+        # -------------------------
+        state_dir = artifact_root / state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        model_path = state_dir / "best_model.pkl"
+        metadata_path = state_dir / "best_model.json"
+
+        joblib.dump(winner_model, model_path)
+
+        metadata = {
+            "state": state,
+            "model_type": winner_name,
+            "metrics": winner_metrics,
+            "data_file": str(file)
+        }
+
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2),
+            encoding="utf-8"
+        )
+
+        print(f"📦 Model saved to {state_dir}")
+
+        # -------------------------
+        # production.json → states
+        # -------------------------
+        production_config["states"][state] = {
+            "model_type": winner_name,
+            "loader": "local",
+            "model_path": str(model_path),
+            "feature_names": winner_features  # ✅ HARDCODE YOK
+        }
+
+    # ==========================================================
+    # production.json overwrite
+    # ==========================================================
+    production_file.write_text(
+        json.dumps(production_config, indent=2),
+        encoding="utf-8"
+    )
+
+    print("\n📝 production.json state-aware olarak güncellendi")
+    print("✅ Tüm state'ler için promotion tamamlandı")
 
     return {
-        "model": model,
-        "mae": float(mae)
+        "states_processed": list(production_config["states"].keys())
     }
+
+
+if __name__ == "__main__":
+    evaluate_and_promote()

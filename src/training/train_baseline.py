@@ -1,51 +1,83 @@
 import pandas as pd
-from sklearn.metrics import mean_absolute_error
+import numpy as np
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error
+)
 from src.models.baseline_model import BaselineModel
 
 
 def train_baseline(data_path: str, target_col: str):
+    """
+    Baseline model training & evaluation.
+    Compatible with unified model selection pipeline.
+    """
 
+    # -------------------------
     # 1️⃣ Load data
+    # -------------------------
     df = pd.read_parquet(data_path)
 
-    # -------------------------
-    # Feature temizliği
-    # -------------------------
+    if df.empty:
+        raise ValueError("Loaded dataset is empty")
 
-    # Datetime model feature değil
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found in dataset")
+
+    # -------------------------
+    # 2️⃣ Feature temizliği
+    # -------------------------
     if "Datetime" in df.columns:
         df = df.drop(columns=["Datetime"])
 
-    # State metadata'dır
     if "state" in df.columns:
         df = df.drop(columns=["state"])
 
     # -------------------------
-    # 2️⃣ Train / Test split
-    # Son 24 saat test
+    # 3️⃣ Train / Test split
     # -------------------------
+    if len(df) <= 24:
+        raise ValueError(
+            "Not enough data to create train/test split (need > 24 rows)"
+        )
+
     train_df = df.iloc[:-24]
     test_df = df.iloc[-24:]
 
     # -------------------------
-    # 3️⃣ Model
+    # 4️⃣ Model
     # -------------------------
     model = BaselineModel(target_col=target_col)
 
-    # Baseline model fit gerektirmez ama mimari uyumu için çağırıyoruz
+    # Baseline genelde naive olduğu için fit mantıksal
     model.fit(train_df)
 
     # -------------------------
-    # 4️⃣ Forecast
+    # 5️⃣ Forecast
     # -------------------------
     predictions = model.forecast_next_24(train_df)
 
+    y_test = test_df[target_col]
+
     # -------------------------
-    # 5️⃣ Evaluate
+    # 6️⃣ Evaluate
     # -------------------------
-    mae = mean_absolute_error(test_df[target_col], predictions)
+    mae = mean_absolute_error(y_test, predictions)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+
+    # MAPE
+    mape = np.mean(
+        np.abs((y_test - predictions) / y_test)
+    ) * 100
 
     return {
+        "model_name": "baseline",
         "model": model,
-        "mae": float(mae)
+        "metrics": {
+            "mae": float(mae),
+            "rmse": float(rmse),
+            "mape": float(mape),
+        },
+        "n_train_rows": int(len(train_df)),
+        "n_test_rows": int(len(test_df)),
     }

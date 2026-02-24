@@ -1,6 +1,6 @@
 {
   "state": "PJME",
   "model_type": "xgboost",
-  "mae": 72.02791341145833,
+  "mae": 187.29410807291666,
   "data_file": "data/processed/PJME_hourly_processed.parquet"
 }

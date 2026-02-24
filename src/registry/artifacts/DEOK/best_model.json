@@ -1,6 +1,6 @@
 {
   "state": "DEOK",
   "model_type": "xgboost",
-  "mae": 4.158650716145833,
+  "mae": 33.85517374674479,
   "data_file": "data/processed/DEOK_hourly_processed.parquet"
 }

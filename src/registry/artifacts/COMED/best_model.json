@@ -1,6 +1,6 @@
 {
   "state": "COMED",
   "model_type": "xgboost",
-  "mae": 30.0703125,
+  "mae": 92.58805338541667,
   "data_file": "data/processed/COMED_hourly_processed.parquet"
 }

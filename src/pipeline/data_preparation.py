@@ -7,6 +7,25 @@ from prefect import task, flow
 
 
 # =====================================================
+# FEATURE CONTRACT (🔥 EN KRİTİK KISIM)
+# =====================================================
+
+FEATURE_COLUMNS = [
+    "hour",
+    "dayofweek",
+    "month",
+    "year",
+    "is_weekend",
+    "sin_hour",
+    "cos_hour",
+    "target_lag_1",
+    "target_lag_24",
+    "target_roll_mean_24",
+    "target_roll_std_24",
+]
+
+
+# =====================================================
 # TASK
 # =====================================================
 
@@ -20,7 +39,7 @@ def process_file_to_parquet(csv_path: Path, output_dir: Path) -> str:
     - parquet + metadata json olarak kaydeder
     """
 
-    file_name = csv_path.stem                 # örn: AEP_hourly
+    file_name = csv_path.stem
     state_name = file_name.split("_")[0].upper()
 
     output_path = output_dir / f"{file_name}_processed.parquet"
@@ -44,21 +63,12 @@ def process_file_to_parquet(csv_path: Path, output_dir: Path) -> str:
 
     lf = lf.with_columns([
         pl.col("Datetime").str.to_datetime(strict=False),
-        pl.col(target_col).cast(pl.Float64, strict=False),
+        pl.col(target_col).cast(pl.Float64, strict=False).alias("target"),
+        pl.lit(state_name).alias("state"),
     ])
 
-    # Target standartlaştır
-    lf = lf.with_columns([
-        pl.col(target_col).alias("target")
-    ])
-
-    # State kolonunu ekle
-    lf = lf.with_columns([
-        pl.lit(state_name).alias("state")
-    ])
-
-    # Temizlik
-    lf = lf.drop_nulls(subset=["Datetime"])
+    # Temel temizlik
+    lf = lf.drop_nulls(subset=["Datetime", "target"])
     lf = lf.sort("Datetime")
     lf = lf.unique(subset=["Datetime"], keep="first")
 
@@ -72,7 +82,7 @@ def process_file_to_parquet(csv_path: Path, output_dir: Path) -> str:
         pl.col("Datetime").dt.year().alias("year"),
         (pl.col("Datetime").dt.weekday() >= 6)
             .cast(pl.Int8)
-            .alias("is_weekend")
+            .alias("is_weekend"),
     ])
 
     # -------------------------
@@ -94,9 +104,18 @@ def process_file_to_parquet(csv_path: Path, output_dir: Path) -> str:
     ])
 
     # -------------------------
-    # 6) Null temizliği
+    # 6) 🔥 KONTROLLÜ NULL TEMİZLİĞİ
     # -------------------------
-    df_final = lf.drop_nulls().collect()
+    df_final = (
+        lf.drop_nulls(subset=[
+            "target_lag_1",
+            "target_lag_24",
+            "target_roll_mean_24",
+            "target_roll_std_24",
+        ])
+        .select(["Datetime", "state", "target"] + FEATURE_COLUMNS)
+        .collect()
+    )
 
     if df_final.height == 0:
         print(f"UYARI: {file_name} için veri boş. Kaydedilmedi.")
@@ -108,14 +127,14 @@ def process_file_to_parquet(csv_path: Path, output_dir: Path) -> str:
     df_final.write_parquet(output_path)
 
     # -------------------------
-    # 8) Metadata kaydet
+    # 8) Metadata (SABİT FEATURE SET)
     # -------------------------
     metadata = {
         "state": state_name,
         "original_target_column": target_col,
         "standardized_target": "target",
         "row_count": int(df_final.height),
-        "feature_columns": df_final.columns
+        "feature_columns": FEATURE_COLUMNS,
     }
 
     metadata_path.write_text(
@@ -138,13 +157,11 @@ def energy_pipeline(raw_data_dir: str = "data/raw_data"):
 
     raw_path = Path(raw_data_dir)
     processed_path = Path("data/processed")
-
     processed_path.mkdir(parents=True, exist_ok=True)
 
     # Eski processed dosyaları temizle
     for f in processed_path.glob("*_processed.parquet"):
         f.unlink()
-
     for f in processed_path.glob("*_processed.json"):
         f.unlink()
 
@@ -156,15 +173,11 @@ def energy_pipeline(raw_data_dir: str = "data/raw_data"):
 
     print(f"Sistem hazır. Toplam {len(raw_files)} dosya işleme alınıyor...\n")
 
-    processed_results = []
-
     for file in raw_files:
-        res = process_file_to_parquet(file, processed_path)
-        if res:
-            processed_results.append(res)
+        process_file_to_parquet(file, processed_path)
 
     print("\n" + "=" * 50)
-    print(f"BAŞARILI: {len(processed_results)} dosya işlendi.")
+    print(f"BAŞARILI: {len(raw_files)} dosya işlendi.")
     print(f"Çıktı klasörü: {processed_path}")
     print("=" * 50)
 

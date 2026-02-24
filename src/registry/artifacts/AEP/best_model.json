@@ -1,6 +1,6 @@
 {
   "state": "AEP",
   "model_type": "xgboost",
-  "mae": 12.562093098958334,
+  "mae": 141.26041666666666,
   "data_file": "data/processed/AEP_hourly_processed.parquet"
 }

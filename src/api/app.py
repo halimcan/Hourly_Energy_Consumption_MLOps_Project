@@ -12,7 +12,10 @@ from src.api.feature_builder import (
     build_features_from_datetime,
 )
 
-app = FastAPI(title="Energy Forecast API", version="0.5.1")
+# 🔥 YENİ: unified inference
+from src.inference.predictor import predict as unified_predict
+
+app = FastAPI(title="Energy Forecast API", version="0.5.2")
 
 
 class PredictRequest(BaseModel):
@@ -32,7 +35,6 @@ def health():
 
 
 def _available_states(full_cfg: Dict[str, Any]):
-    # production.json: states veya state_models destekle
     block = full_cfg.get("states") or full_cfg.get("state_models") or {}
     if not isinstance(block, dict):
         return []
@@ -54,11 +56,15 @@ def model_info(state: str):
     return {
         "state": state,
         "loader": state_cfg.get("loader") or full_cfg.get("loader"),
+        "model_type": state_cfg.get("model_type"),
         "feature_names": state_cfg.get("feature_names"),
         "available_states": _available_states(full_cfg),
     }
 
 
+# ======================================================
+# PREDICT (FEATURE-BASED)
+# ======================================================
 @app.post("/predict")
 def predict(req: PredictRequest):
 
@@ -69,7 +75,9 @@ def predict(req: PredictRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    model_type = state_cfg.get("model_type", "xgboost")
     feature_names = state_cfg.get("feature_names", [])
+
     missing = [f for f in feature_names if f not in req.features]
     if missing:
         raise HTTPException(status_code=400, detail=f"Eksik feature'lar: {missing}")
@@ -77,14 +85,31 @@ def predict(req: PredictRequest):
     x = build_feature_vector(req.features, feature_names)
 
     try:
-        y = model.predict(x)
-        pred = float(y[0])
+        y = unified_predict(
+            model=model,
+            model_type=model_type,
+            data=x
+        )
+
+        # baseline 24 saatlik çıktı verebilir
+        if hasattr(y, "__len__"):
+            pred = float(y[0])
+        else:
+            pred = float(y)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Predict hatası: {str(e)}")
 
-    return {"state": state, "prediction": pred}
+    return {
+        "state": state,
+        "model_type": model_type,
+        "prediction": pred
+    }
 
 
+# ======================================================
+# PREDICT FROM DATETIME
+# ======================================================
 @app.post("/predict-from-datetime")
 def predict_from_datetime(req: PredictFromDatetimeRequest):
 
@@ -95,6 +120,15 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    model_type = state_cfg.get("model_type", "xgboost")
+
+    # ❌ Baseline datetime desteklemez
+    if model_type == "baseline":
+        raise HTTPException(
+            status_code=400,
+            detail="Baseline model datetime-based prediction desteklemez."
+        )
+
     try:
         features = build_features_from_datetime(state, req.datetime)
     except Exception as e:
@@ -104,9 +138,19 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
     x = build_feature_vector(features, feature_names)
 
     try:
-        y = model.predict(x)
+        y = unified_predict(
+            model=model,
+            model_type=model_type,
+            data=x
+        )
         pred = float(y[0])
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Predict hatası: {str(e)}")
 
-    return {"state": state, "datetime": req.datetime.isoformat(), "prediction": pred}
+    return {
+        "state": state,
+        "datetime": req.datetime.isoformat(),
+        "model_type": model_type,
+        "prediction": pred
+    }

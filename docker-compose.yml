@@ -1,5 +1,4 @@
 services:
-
   postgres:
     image: postgres:15
     container_name: prefect_postgres
@@ -11,24 +10,24 @@ services:
     volumes:
       - prefect-db:/var/lib/postgresql/data
 
-
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     container_name: mlflow_server
     restart: always
     ports:
       - "5000:5000"
+    volumes:
+      - ./mlflow:/mlflow
     command: >
+      sh -c "
+      mkdir -p /mlflow/artifacts &&
       mlflow server
-      --backend-store-uri sqlite:///mlflow.db
+      --backend-store-uri sqlite:////mlflow/mlflow.db
       --default-artifact-root /mlflow/artifacts
       --host 0.0.0.0
       --port 5000
       --allowed-hosts '*'
-    volumes:
-      - ./mlruns:/mlflow/artifacts
-      - ./mlflow.db:/mlflow.db
-
+      "
 
   prefect:
     image: prefecthq/prefect:2.16.7-python3.12
@@ -45,60 +44,62 @@ services:
     depends_on:
       - postgres
 
-
   prefect-worker:
     build: .
     container_name: prefect_worker
     restart: always
+    working_dir: /app
     environment:
       PREFECT_API_URL: http://prefect:4200/api
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      PYTHONPATH: /app
     command: >
       bash -c "
       sleep 10 &&
       prefect worker start --pool default-agent-pool --type process
       "
     volumes:
-      - .:/app
+      - .:/app:rw
     depends_on:
       - prefect
       - mlflow
-
 
   ml_ops_app:
     build: .
     container_name: energy_mlops_container
     restart: always
+    working_dir: /app
     volumes:
-      - .:/app
+      - .:/app:rw
     ports:
       - "8000:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       PREFECT_API_URL: http://prefect:4200/api
+      PYTHONPATH: /app
     depends_on:
       - mlflow
       - prefect
     stdin_open: true
     tty: true
 
-
-  # ✅ YENİ STREAMLIT SERVİSİ
   streamlit_ui:
     build: .
     container_name: energy_streamlit_ui
     restart: always
+    working_dir: /app
     volumes:
-      - .:/app
+      - .:/app:rw
     ports:
       - "8501:8501"
+    environment:
+      PYTHONPATH: /app
     command: >
       streamlit run ui/app.py
       --server.port=8501
       --server.address=0.0.0.0
     depends_on:
       - ml_ops_app
-
 
 volumes:
   prefect-db:
