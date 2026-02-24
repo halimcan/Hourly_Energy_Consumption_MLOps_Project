@@ -1,83 +1,83 @@
 import pandas as pd
 import numpy as np
+
 from sklearn.metrics import (
     mean_absolute_error,
     mean_squared_error
 )
+
 from src.models.baseline_model import BaselineModel
 
 
 def train_baseline(data_path: str, target_col: str):
     """
     Baseline model training & evaluation.
-    Compatible with unified model selection pipeline.
+    Primary metric: RMSE
+    Secondary metrics: MAE, MAPE
     """
 
-    # -------------------------
+    # -------------------------------------------------
     # 1️⃣ Load data
-    # -------------------------
+    # -------------------------------------------------
     df = pd.read_parquet(data_path)
 
-    if df.empty:
-        raise ValueError("Loaded dataset is empty")
-
-    if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' not found in dataset")
-
-    # -------------------------
-    # 2️⃣ Feature temizliği
-    # -------------------------
+    # -------------------------------------------------
+    # 2️⃣ Feature cleanup (metadata çıkar)
+    # -------------------------------------------------
     if "Datetime" in df.columns:
         df = df.drop(columns=["Datetime"])
 
     if "state" in df.columns:
         df = df.drop(columns=["state"])
 
-    # -------------------------
+    # -------------------------------------------------
     # 3️⃣ Train / Test split
-    # -------------------------
-    if len(df) <= 24:
-        raise ValueError(
-            "Not enough data to create train/test split (need > 24 rows)"
-        )
-
+    # Son 24 saat test
+    # -------------------------------------------------
     train_df = df.iloc[:-24]
     test_df = df.iloc[-24:]
 
-    # -------------------------
+    y_true = test_df[target_col].values
+
+    # -------------------------------------------------
     # 4️⃣ Model
-    # -------------------------
+    # -------------------------------------------------
     model = BaselineModel(target_col=target_col)
 
-    # Baseline genelde naive olduğu için fit mantıksal
+    # Baseline model fit gerektirmez
     model.fit(train_df)
 
-    # -------------------------
+    # -------------------------------------------------
     # 5️⃣ Forecast
-    # -------------------------
-    predictions = model.forecast_next_24(train_df)
+    # -------------------------------------------------
+    y_pred = model.forecast_next_24(train_df)
+    y_pred = np.array(y_pred)
 
-    y_test = test_df[target_col]
+    # -------------------------------------------------
+    # 6️⃣ Metrics
+    # -------------------------------------------------
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = mean_squared_error(y_true, y_pred, squared=False)
 
-    # -------------------------
-    # 6️⃣ Evaluate
-    # -------------------------
-    mae = mean_absolute_error(y_test, predictions)
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+    # MAPE (0 bölme koruması)
+    non_zero_mask = y_true != 0
+    if non_zero_mask.any():
+        mape = (
+            np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask])
+        ).mean() * 100
+    else:
+        mape = None
 
-    # MAPE
-    mape = np.mean(
-        np.abs((y_test - predictions) / y_test)
-    ) * 100
-
+    # -------------------------------------------------
+    # 7️⃣ Result
+    # -------------------------------------------------
     return {
         "model_name": "baseline",
         "model": model,
+        "primary_metric": "rmse",
         "metrics": {
-            "mae": float(mae),
             "rmse": float(rmse),
-            "mape": float(mape),
-        },
-        "n_train_rows": int(len(train_df)),
-        "n_test_rows": int(len(test_df)),
+            "mae": float(mae),
+            "mape": float(mape) if mape is not None else None
+        }
     }
