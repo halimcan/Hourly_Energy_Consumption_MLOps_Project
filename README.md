@@ -1,4 +1,4 @@
-⚡ Hourly Energy Consumption Forecasting – Structured ML Pipeline
+ Hourly Energy Consumption Forecasting – Structured ML Pipeline
 
 A modular time series forecasting system built with Prefect, XGBoost, MLflow, FastAPI, Docker and Make.
 
