@@ -6,3 +6,9 @@ mlruns/
 mlflow.db
 data/
 *.ipynb_checkpoints/
+mlops_env/
+venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store

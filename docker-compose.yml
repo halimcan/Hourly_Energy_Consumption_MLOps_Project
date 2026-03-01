@@ -59,7 +59,7 @@ services:
       prefect worker start --pool default-agent-pool --type process
       "
     volumes:
-      - .:/app:rw
+      - .:/app:rw  # ✅ Bilgisayardaki kod değişince worker anında görür
     depends_on:
       - prefect
       - mlflow
@@ -70,7 +70,7 @@ services:
     restart: always
     working_dir: /app
     volumes:
-      - .:/app:rw
+      - .:/app:rw  # ✅ Bilgisayardaki kod değişince uygulama anında görür
     ports:
       - "8000:8000"
     environment:
@@ -89,7 +89,7 @@ services:
     restart: always
     working_dir: /app
     volumes:
-      - .:/app:rw
+      - .:/app:rw  # ✅ UI kodunu değiştirince sayfayı yenilemen yeterli
     ports:
       - "8501:8501"
     environment:

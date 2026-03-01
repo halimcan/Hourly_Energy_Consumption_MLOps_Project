@@ -12,12 +12,18 @@ from src.api.feature_builder import (
     build_features_from_datetime,
 )
 
-# 🔥 YENİ: unified inference
+# 🔥 unified inference
 from src.inference.predictor import predict as unified_predict
 
-app = FastAPI(title="Energy Forecast API", version="0.5.2")
+# 🔥 drift logging
+from src.monitoring.prediction_logger import log_prediction
+
+app = FastAPI(title="Energy Forecast API", version="0.6.1")
 
 
+# ======================
+# Schemas
+# ======================
 class PredictRequest(BaseModel):
     state: str
     features: Dict[str, float]
@@ -29,6 +35,9 @@ class PredictFromDatetimeRequest(BaseModel):
     datetime: datetime
 
 
+# ======================
+# Health
+# ======================
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -41,6 +50,9 @@ def _available_states(full_cfg: Dict[str, Any]):
     return list(block.keys())
 
 
+# ======================
+# Model Info
+# ======================
 @app.get("/model-info/{state}")
 def model_info(state: str):
 
@@ -78,24 +90,56 @@ def predict(req: PredictRequest):
     model_type = state_cfg.get("model_type", "xgboost")
     feature_names = state_cfg.get("feature_names", [])
 
-    missing = [f for f in feature_names if f not in req.features]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Eksik feature'lar: {missing}")
-
-    x = build_feature_vector(req.features, feature_names)
-
     try:
-        y = unified_predict(
-            model=model,
-            model_type=model_type,
-            data=x
-        )
-
-        # baseline 24 saatlik çıktı verebilir
-        if hasattr(y, "__len__"):
+        # ===============================
+        # Prophet
+        # ===============================
+        if model_type == "prophet":
+            y = unified_predict(
+                model=model,
+                model_type=model_type,
+                data=req.features  # kullanılmaz
+            )
             pred = float(y[0])
+
+        # ===============================
+        # Baseline
+        # ===============================
+        elif model_type == "baseline":
+            y = unified_predict(
+                model=model,
+                model_type=model_type,
+                data=req.features
+            )
+            pred = float(y[0])
+
+        # ===============================
+        # Feature-based
+        # ===============================
         else:
-            pred = float(y)
+            missing = [f for f in feature_names if f not in req.features]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Eksik feature'lar: {missing}"
+                )
+
+            x = build_feature_vector(req.features, feature_names)
+
+            y = unified_predict(
+                model=model,
+                model_type=model_type,
+                data=x
+            )
+            pred = float(y[0])
+
+        # 🔥 LOG PREDICTION
+        log_prediction(
+            state=state,
+            model_type=model_type,
+            prediction=pred,
+            features=req.features
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Predict hatası: {str(e)}")
@@ -122,7 +166,6 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
 
     model_type = state_cfg.get("model_type", "xgboost")
 
-    # ❌ Baseline datetime desteklemez
     if model_type == "baseline":
         raise HTTPException(
             status_code=400,
@@ -130,20 +173,42 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
         )
 
     try:
-        features = build_features_from_datetime(state, req.datetime)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # ===============================
+        # Prophet
+        # ===============================
+        if model_type == "prophet":
+            y = unified_predict(
+                model=model,
+                model_type=model_type,
+                data=req.datetime
+            )
+            pred = float(y[0])
 
-    feature_names = state_cfg.get("feature_names", [])
-    x = build_feature_vector(features, feature_names)
+            log_features = {"datetime": req.datetime.isoformat()}
 
-    try:
-        y = unified_predict(
-            model=model,
+        # ===============================
+        # Feature-based
+        # ===============================
+        else:
+            features = build_features_from_datetime(state, req.datetime)
+            feature_names = state_cfg.get("feature_names", [])
+            x = build_feature_vector(features, feature_names)
+
+            y = unified_predict(
+                model=model,
+                model_type=model_type,
+                data=x
+            )
+            pred = float(y[0])
+            log_features = features
+
+        # 🔥 LOG PREDICTION
+        log_prediction(
+            state=state,
             model_type=model_type,
-            data=x
+            prediction=pred,
+            features=log_features
         )
-        pred = float(y[0])
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Predict hatası: {str(e)}")

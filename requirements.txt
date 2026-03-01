@@ -4,7 +4,7 @@ fastapi
 uvicorn
 polars
 pandas
-numpy
+numpy<2.0
 scikit-learn
 xgboost
 pyarrow
@@ -17,3 +17,4 @@ joblib
 streamlit
 requests
 prophet
+evidently==0.4.16
