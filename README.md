@@ -12,6 +12,23 @@ This project is a full **end-to-end MLOps system** built using real-world time s
 
 ---
 
+## 📊 Dataset
+
+* Source: PJM Hourly Energy Consumption Dataset
+* Kaggle: https://www.kaggle.com/datasets/robikscube/hourly-energy-consumption
+
+The dataset contains **hourly electricity consumption (MW)** across multiple U.S. regions.
+
+PJM (Pennsylvania–New Jersey–Maryland Interconnection) operates a large part of the U.S. power grid, covering multiple states.
+
+⚠️ Note:
+
+* Regions vary over time
+* Some regions have missing periods
+* This makes it closer to **real-world imperfect data**
+
+---
+
 ## 🎯 Key Idea
 
 This system bridges:
@@ -97,7 +114,7 @@ CWE = error × penalty_factor
 
 * Real-time metrics (latency, volume, RMSE)
 * Drift detection with Evidently
-* Retrain signals (NOT automatic)
+* Retrain signals (**NOT automatic**)
 
 ### 🚨 Strategy
 
@@ -135,13 +152,29 @@ make down-local
 
 ---
 
-### 🐳 Docker
+### 🐳 Docker (Production-like Setup)
 
 ```bash
 docker compose up --build
 ```
 
-👉 Use branch:
+👉 Recommended when you want:
+
+* Isolated environment
+* Reproducible setup
+* Production-like behavior
+
+👉 Includes:
+
+* All services containerized
+* Networked services (API, monitoring, MLflow, etc.)
+* Clean dependency management
+
+---
+
+### 📦 Version
+
+Use branch:
 
 ```
 step6-finalized
@@ -179,13 +212,13 @@ step6-finalized
 * **Tracking**: MLflow
 * **Orchestration**: Prefect
 * **UI**: Streamlit
-* **Infra**: Docker
+* **Infrastructure**: Docker
 
 ---
 
 ## 🔮 Future Improvements
 
-* 📦 Data validation (**Great Expectations**)
+* 📦 Data validation (Great Expectations)
 * 🚨 Alerts (Email / Slack)
 * 🔁 CI/CD (GitHub Actions / Jenkins)
 * 📊 Streamlit:
@@ -194,6 +227,10 @@ step6-finalized
   * What-if simulation (sliders)
 * 🌓 Shadow deployment
 * ☁️ Cloud deployment
+
+
+
+
 
 
 
