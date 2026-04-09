@@ -24,19 +24,7 @@ Unit testing with Pytest
 
 Makefile-driven execution
 
-Structured data directory (data/, processed/)
-
-Not included:
-
-Deep learning models (LSTM / TFT)
-
-Monitoring / drift detection
-
-Automated retraining
-
-CI/CD
-
-Cloud deployment
+Structured data directory (data/, processed
 
 Problem Definition
 
