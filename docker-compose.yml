@@ -52,7 +52,11 @@ services:
         sleep 10 &&
         prefect work-pool create default-agent-pool --type process 2>/dev/null || true &&
         prefect deploy --all &&
+        echo 'Step 1: Data preparation...' &&
+        prefect deployment run 'Energy Data Multi-File Pipeline/energy-data-prep' --watch &&
+        echo 'Step 2: Training...' &&
         prefect deployment run 'evaluate-and-promote-multi-state/training-deployment' --watch &&
+        echo 'Step 3: Starting inference simulation...' &&
         prefect deployment run 'inference-simulation-flow/inference-simulation' &
         prefect worker start --pool default-agent-pool --type process
       "

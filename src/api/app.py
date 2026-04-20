@@ -31,6 +31,9 @@ from src.monitoring.metrics import (
 from src.metrics.cost_weighted_error import cost_weighted_error
 from src.training.evaluate_and_promote_flow import evaluate_and_promote
 
+# 🔥 Merkezi state listesi
+from src.config.states import STATES
+
 # ================================
 # Logging
 # ================================
@@ -46,13 +49,6 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Energy Forecast API", version="2.3.0")
 
 LAST_RETRAIN_TIME = None
-
-# ================================
-# 🔥 FIX: State listesi
-# inference_flow.py /available-states endpoint'ini çağırıyor.
-# Bu endpoint olmadığı için flow sadece ["DAYTON"] ile çalışıyordu.
-# ================================
-STATES = ["AEP", "COMED", "DAYTON", "DEOK", "DOM", "DUQ", "EKPC", "FE", "PJME", "PJMW"]
 
 
 # ================================
@@ -89,7 +85,7 @@ def metrics():
 
 
 # ================================
-# 🔥 FIX: /available-states endpoint EKLENDİ
+# 🔥 /available-states endpoint
 # ================================
 @app.get("/available-states")
 def available_states():
@@ -101,18 +97,13 @@ def available_states():
 # ================================
 def log_metrics_safe(state, pred, latency, actual, features, model_name, model_version):
     try:
-        # ALWAYS
         active_model.labels(state=state, model_type=model_name, model_version=model_version).set(1)
-
         prediction_count.labels(state=state, model_type=model_name, model_version=model_version).inc()
         prediction_latency.labels(state=state, model_type=model_name, model_version=model_version).observe(latency)
         prediction_value.labels(state=state, model_type=model_name, model_version=model_version).observe(pred)
 
-        # ONLY IF ACTUAL EXISTS
         if actual is not None:
-
             error = actual - pred
-
             absolute_error.labels(state=state, model_type=model_name, model_version=model_version).observe(abs(error))
             squared_error.labels(state=state, model_type=model_name, model_version=model_version).observe(error ** 2)
 
@@ -127,7 +118,6 @@ def log_metrics_safe(state, pred, latency, actual, features, model_name, model_v
                 overprediction_count.labels(state=state, model_type=model_name, model_version=model_version).inc()
 
             cwe = cost_weighted_error([actual], [pred])
-
             cost_weighted_error_metric.labels(state=state, model_type=model_name, model_version=model_version).observe(cwe)
 
     except Exception as e:
@@ -139,7 +129,6 @@ def log_metrics_safe(state, pred, latency, actual, features, model_name, model_v
 # ================================
 @app.post("/predict")
 def predict(req: PredictRequest):
-
     start = time.time()
     state = req.state.strip().upper()
 
@@ -161,17 +150,8 @@ def predict(req: PredictRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     latency = time.time() - start
-
-    log_metrics_safe(
-        state,
-        pred,
-        latency,
-        req.actual,
-        req.features,
-        cfg.get("model_type", "unknown"),
-        cfg.get("version", "v1")
-    )
-
+    log_metrics_safe(state, pred, latency, req.actual, req.features,
+                     cfg.get("model_type", "unknown"), cfg.get("version", "v1"))
     return {"prediction": pred, "latency": latency}
 
 
@@ -180,7 +160,6 @@ def predict(req: PredictRequest):
 # ================================
 @app.post("/predict-from-datetime")
 def predict_from_datetime(req: PredictFromDatetimeRequest):
-
     start = time.time()
     state = req.state.strip().upper()
 
@@ -195,40 +174,18 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
         raise HTTPException(status_code=500, detail="Feature names missing")
 
     try:
-        # 🔥 DATA
         features = build_features_from_datetime(state, req.datetime)
-
-        # 🔥 AUTO ACTUAL
-        actual = features.get("target")
-
-        if actual is None:
-            actual = features.get(f"{state}_MW")
-
+        actual = features.get("target") or features.get(f"{state}_MW")
         x = build_feature_vector(features, feature_names)
         pred = float(model.predict(x)[0])
-
     except Exception as e:
         prediction_errors.inc()
         raise HTTPException(status_code=500, detail=str(e))
 
     latency = time.time() - start
-
-    log_metrics_safe(
-        state,
-        pred,
-        latency,
-        actual,
-        features,
-        cfg.get("model_type", "unknown"),
-        cfg.get("version", "v1")
-    )
-
-    return {
-        "state": state,
-        "prediction": pred,
-        "actual": actual,
-        "latency": latency
-    }
+    log_metrics_safe(state, pred, latency, actual, features,
+                     cfg.get("model_type", "unknown"), cfg.get("version", "v1"))
+    return {"state": state, "prediction": pred, "actual": actual, "latency": latency}
 
 
 # ================================
@@ -237,8 +194,6 @@ def predict_from_datetime(req: PredictFromDatetimeRequest):
 @app.post("/approve_retrain")
 def approve_retrain():
     global LAST_RETRAIN_TIME
-
     evaluate_and_promote()
     LAST_RETRAIN_TIME = datetime.utcnow()
-
     return {"status": "ok", "time": LAST_RETRAIN_TIME.isoformat()}

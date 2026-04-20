@@ -20,7 +20,7 @@ all: up test
 # =========================
 # LOCAL MODE
 # make up-local → servisleri başlat
-# make deploy-local → training bekle → inference başlat
+# make deploy-local → data prep → training → inference
 # =========================
 
 up-local:
@@ -40,9 +40,11 @@ down-local:
 
 deploy-local:
 	prefect deploy --all
-	@echo "🚀 Running training deployment (waiting for completion)..."
+	@echo "🚀 Step 1: Data preparation..."
+	prefect deployment run 'Energy Data Multi-File Pipeline/energy-data-prep' --watch
+	@echo "✅ Data ready. Step 2: Training..."
 	prefect deployment run 'evaluate-and-promote-multi-state/training-deployment' --watch
-	@echo "✅ Training done. Starting inference simulation..."
+	@echo "✅ Training done. Step 3: Starting inference simulation..."
 	prefect deployment run 'inference-simulation-flow/inference-simulation'
 
 
@@ -72,7 +74,7 @@ help:
 	@echo "========================================="
 	@echo "  make up-local      -> Servisleri başlat"
 	@echo "  make down-local    -> Servisleri durdur"
-	@echo "  make deploy-local  -> Training → Inference"
+	@echo "  make deploy-local  -> Data Prep → Training → Inference"
 	@echo ""
 	@echo "========================================="
 	@echo "  DEV MODE"

@@ -6,6 +6,9 @@ from src.api.state_data_cache import get_state_df
 from src.api.model_loader import load_model_from_registry
 from src.api.feature_builder import build_feature_vector
 
+# 🔥 Merkezi state listesi
+from src.config.states import STATES
+
 # ================================
 # CONFIG
 # ================================
@@ -34,7 +37,7 @@ def load_model_cached(state):
 
 
 # ================================
-# 🔥 FIXED FEATURE LIST
+# FIXED FEATURE LIST
 # ================================
 DEFAULT_FEATURES = [
     "hour", "dayofweek", "month", "year", "is_weekend",
@@ -70,11 +73,7 @@ def run_predictions_cached(df_pd, feature_names, target_col, state, under_penalt
     preds = model.predict(X)
 
     actuals = [row[target_col] for _, row in valid_rows]
-
-    baselines = [
-        row.get("target_lag_24", np.nan)
-        for _, row in valid_rows
-    ]
+    baselines = [row.get("target_lag_24", np.nan) for _, row in valid_rows]
 
     df_result = pd.DataFrame({
         "actual": actuals,
@@ -83,15 +82,12 @@ def run_predictions_cached(df_pd, feature_names, target_col, state, under_penalt
     })
 
     df_result["error"] = df_result["actual"] - df_result["prediction"]
-
     df_result["cost"] = np.where(
         df_result["error"] > 0,
         df_result["error"] * under_penalty,
         np.abs(df_result["error"]) * over_penalty
     )
-
     df_result["baseline_error"] = df_result["actual"] - df_result["baseline"]
-
     df_result["baseline_cost"] = np.where(
         df_result["baseline_error"] > 0,
         df_result["baseline_error"] * under_penalty,
@@ -115,22 +111,26 @@ if st.sidebar.button("Clear Cache"):
 
 
 # ================================
-# STATE
+# STATE — merkezi listeden geliyor
 # ================================
-state = st.selectbox(
-    "Select State",
-    ["AEP", "COMED", "DAYTON", "DEOK", "DOM", "DUQ", "EKPC", "FE", "NI", "PJME", "PJMW"]
-)
+state = st.selectbox("Select State", STATES)
 
 # ================================
 # LOAD
 # ================================
-df_pd = load_data(state)
-model, cfg = load_model_cached(state)
+try:
+    df_pd = load_data(state)
+    model, cfg = load_model_cached(state)
+except FileNotFoundError:
+    st.error(f"❌ '{state}' için işlenmiş veri bulunamadı. Lütfen önce data preparation pipeline'ını çalıştırın.")
+    st.code("prefect deployment run 'Energy Data Multi-File Pipeline/energy-data-prep' --watch")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ Model veya veri yüklenemedi: {e}")
+    st.stop()
 
 model_name = cfg.get("model_type", "unknown")
 
-# 🔥 FIXED FEATURE NAMES
 feature_names = cfg.get("feature_names")
 if not feature_names or len(feature_names) == 0:
     feature_names = DEFAULT_FEATURES
@@ -150,12 +150,7 @@ df_pd = df_pd.tail(200)
 # ================================
 with st.spinner("Running predictions..."):
     df_result = run_predictions_cached(
-        df_pd,
-        feature_names,
-        target_col,
-        state,
-        under_penalty,
-        over_penalty
+        df_pd, feature_names, target_col, state, under_penalty, over_penalty
     )
 
 if df_result is None or len(df_result) == 0:
@@ -167,21 +162,30 @@ if df_result is None or len(df_result) == 0:
 # ================================
 total_cost = df_result["cost"].sum()
 baseline_cost = df_result["baseline_cost"].sum()
-
 cost_diff = total_cost - baseline_cost
 cost_diff_pct = (cost_diff / baseline_cost) * 100 if baseline_cost != 0 else 0
-
 under_rate = (df_result["error"] > 0).mean()
+
+peak_cost = df_result["cost"].max()
+p95_cost = df_result["cost"].quantile(0.95)
+under_cost = df_result.loc[df_result["error"] > 0, "cost"].sum()
+over_cost = df_result.loc[df_result["error"] <= 0, "cost"].sum()
+peak_under = (df_result.loc[df_result["error"] > 0, "error"]).max() if (df_result["error"] > 0).any() else 0
 
 # ================================
 # UI
 # ================================
 col1, col2, col3, col4 = st.columns(4)
-
 col1.metric("💰 Total Cost", f"${total_cost:,.0f}")
 col2.metric("📉 vs Baseline", f"{cost_diff_pct:.2f}%", delta=f"${cost_diff:,.0f}")
 col3.metric("⚠️ Underprediction", f"{under_rate:.2%}")
-col4.metric("🔥 Peak Cost", f"${df_result['cost'].sum():,.0f}")
+col4.metric("🔥 Peak Cost", f"${peak_cost:,.0f}")
+
+col5, col6, col7, col8 = st.columns(4)
+col5.metric("🔥 Peak Under", f"{peak_under:,.2f}")
+col6.metric("⚠️ P95 Cost", f"${p95_cost:,.0f}")
+col7.metric("🔴 Under Cost", f"${under_cost:,.0f}")
+col8.metric("🟢 Over Cost", f"${over_cost:,.0f}")
 
 st.info(f"Active Model: {model_name}")
 
@@ -193,6 +197,9 @@ st.line_chart(df_result[["actual", "prediction", "baseline"]])
 
 st.subheader("💰 Cost Over Time")
 st.line_chart(df_result["cost"])
+
+st.subheader("📊 Cost Distribution")
+st.bar_chart(df_result["cost"])
 
 # ================================
 # RAW
